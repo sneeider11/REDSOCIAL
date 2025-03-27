@@ -1,14 +1,15 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, db
 import questionary
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-# Configuración de Firebase
+# Configuración exclusiva para Realtime Database
 cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://redsocial-9a347-default-rtdb.firebaseio.com/'  # Reemplaza con tu URL real
+})
 
 # Variable global para el usuario actual
 usuario_actual = None
@@ -22,7 +23,7 @@ def mostrar_mensaje(titulo, contenido, estilo="red"):
                        border_style=estilo))
 
 def registrar_usuario():
-    """Registra un nuevo usuario en Firestore (sin encriptación)"""
+    """Registra un nuevo usuario directamente en Realtime Database"""
     console.print(Panel("Registro de nuevo usuario", style="blue"))
     
     datos = questionary.form(
@@ -36,67 +37,65 @@ def registrar_usuario():
         mostrar_mensaje("Error", "Las contraseñas no coinciden")
         return
     
-    # Verificar si el usuario ya existe
-    usuarios_ref = db.collection("usuarios")
-    query = usuarios_ref.where("email", "==", datos["email"]).get()
+    # Referencia a la colección de usuarios
+    usuarios_ref = db.reference('usuarios')
     
-    if len(query) > 0:
-        mostrar_mensaje("Error", "El correo electrónico ya está registrado")
-        return
+    # Verificar si el email ya existe
+    usuarios = usuarios_ref.get() or {}
+    for uid, user_data in usuarios.items():
+        if user_data.get('email') == datos["email"]:
+            mostrar_mensaje("Error", "El correo electrónico ya está registrado")
+            return
     
-    # Guardar usuario en Firestore (contraseña en texto plano)
-    nuevo_usuario = {
+    # Crear nuevo usuario con ID automático
+    nuevo_usuario_ref = usuarios_ref.push({
         "email": datos["email"],
         "nombre": datos["nombre"],
-        "contraseña": datos["contraseña"],  # ← Sin hash
+        "contraseña": datos["contraseña"],  # ¡Precaución: Almacenamiento inseguro!
         "activo": True
-    }
+    })
     
-    usuarios_ref.add(nuevo_usuario)
-    mostrar_mensaje("Éxito", "Usuario registrado correctamente", "green")
+    mostrar_mensaje("Éxito", f"Usuario registrado con ID: {nuevo_usuario_ref.key}", "green")
 
 def iniciar_sesion():
-    """Inicia sesión con un usuario existente (sin bcrypt)"""
+    """Inicia sesión buscando en Realtime Database"""
     global usuario_actual
     
     console.print(Panel("Inicio de sesión", style="blue"))
     
-    datos = questionary.form(
+    credenciales = questionary.form(
         email=questionary.text("Correo electrónico:"),
         contraseña=questionary.password("Contraseña:")
     ).ask()
     
-    # Buscar usuario en Firestore
-    usuarios_ref = db.collection("usuarios")
-    query = usuarios_ref.where("email", "==", datos["email"]).get()
+    # Buscar en todos los usuarios
+    usuarios_ref = db.reference('usuarios')
+    usuarios = usuarios_ref.get() or {}
     
-    if len(query) == 0:
-        mostrar_mensaje("Error", "❌ Usuario no encontrado")
+    usuario_encontrado = None
+    for uid, user_data in usuarios.items():
+        if user_data.get('email') == credenciales["email"]:
+            if user_data.get('contraseña') == credenciales["contraseña"]:
+                usuario_encontrado = user_data
+                usuario_encontrado['id'] = uid
+                break
+    
+    if not usuario_encontrado:
+        mostrar_mensaje("Error", "Credenciales incorrectas")
         return
     
-    # Obtener datos del usuario
-    usuario = query[0].to_dict()
-    usuario["id"] = query[0].id
-    
-    # Verificar contraseña (comparación directa)
-    if datos["contraseña"] != usuario["contraseña"]:  # ← Sin bcrypt
-        mostrar_mensaje("Error", "❌ Contraseña incorrecta")
-        return
-    
-    # Establecer usuario actual
     usuario_actual = {
-        "id": usuario["id"],
-        "email": usuario["email"],
-        "nombre": usuario["nombre"]
+        "id": usuario_encontrado['id'],
+        "email": usuario_encontrado['email'],
+        "nombre": usuario_encontrado['nombre']
     }
     
-    mostrar_mensaje("Éxito", f"Bienvenido, {usuario['nombre']}!", "green")
+    mostrar_mensaje("Éxito", f"Bienvenido, {usuario_actual['nombre']}!", "green")
 
-# ... (El resto del código de menús permanece igual)
 def menu_principal():
-    """Muestra el menú principal"""
+    """Menú principal solo con opciones de Realtime Database"""
     while True:
-        console.print(Panel("Sistema de Autenticación", style="bold blue"))
+        console.print(Panel("Sistema de Autenticación (Realtime DB)", style="bold blue"))
         
         opcion = questionary.select(
             "Seleccione una opción:",
@@ -117,11 +116,11 @@ def menu_principal():
             break
 
 def menu_usuario():
-    """Muestra el menú para usuarios autenticados"""
+    """Menú para usuarios autenticados"""
     global usuario_actual
     
     while usuario_actual:
-        console.print(Panel(f"Bienvenido, {usuario_actual['nombre']}", style="bold green"))
+        console.print(Panel(f"Usuario: {usuario_actual['nombre']}", style="bold green"))
         
         opcion = questionary.select(
             "Seleccione una opción:",
@@ -138,13 +137,17 @@ def menu_usuario():
             mostrar_mensaje("Info", "Sesión cerrada correctamente", "blue")
 
 def mostrar_perfil():
-    """Muestra la información del perfil del usuario"""
+    """Muestra datos del usuario desde Realtime Database"""
     if not usuario_actual:
         return
     
+    # Obtener datos actualizados
+    usuario_ref = db.reference(f'usuarios/{usuario_actual["id"]}')
+    datos_usuario = usuario_ref.get()
+    
     console.print(Panel.fit(
-        f"Nombre: {usuario_actual['nombre']}\n"
-        f"Email: {usuario_actual['email']}\n"
+        f"Nombre: {datos_usuario['nombre']}\n"
+        f"Email: {datos_usuario['email']}\n"
         f"ID: {usuario_actual['id']}",
         title="Perfil de usuario",
         border_style="green"
