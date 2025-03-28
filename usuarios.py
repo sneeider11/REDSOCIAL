@@ -677,7 +677,7 @@ def mostrar_perfil():
 def menu_principal():
     """Menú principal de la aplicación"""
     while True:
-        console.print(Panel("Red Social con Firebase", style="bold blue"))
+        console.print(Panel("GuaroGamers", style="bold blue"))
         
         opciones = [
             "Iniciar sesión",
