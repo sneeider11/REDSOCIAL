@@ -51,6 +51,78 @@ def verificar_contraseña(contraseña_plana, contraseña_hash):
     # Verificar
     return bcrypt.checkpw(contraseña_plana, contraseña_hash)
 
+# Funciones para "me gusta"
+def dar_me_gusta(publicacion_id):
+    """Da me gusta a una publicación y actualiza en Firebase"""
+    if not usuario_actual:
+        mostrar_mensaje("Error", "Debes iniciar sesión para dar me gusta", "red")
+        return False
+    
+    try:
+        # Referencia a la publicación
+        pub_ref = db.reference(f'publicaciones/{publicacion_id}')
+        publicacion = pub_ref.get()
+        
+        if not publicacion:
+            mostrar_mensaje("Error", "Publicación no encontrada", "red")
+            return False
+        
+        # Verificar si el usuario ya dio me gusta
+        liked_by = publicacion.get('liked_by', {})
+        
+        if usuario_actual['id'] in liked_by:
+            # Si ya dio me gusta, lo quitamos
+            del liked_by[usuario_actual['id']]
+            likes = publicacion.get('likes', 0) - 1
+            if likes < 0:
+                likes = 0
+            mostrar_mensaje("Info", "Has quitado tu me gusta", "blue")
+        else:
+            # Si no ha dado me gusta, lo añadimos
+            liked_by[usuario_actual['id']] = True
+            likes = publicacion.get('likes', 0) + 1
+            mostrar_mensaje("Éxito", "¡Has dado me gusta a esta publicación!", "green")
+        
+        # Actualizar publicación
+        pub_ref.update({
+            'likes': likes,
+            'liked_by': liked_by
+        })
+        
+        return True
+    except Exception as e:
+        mostrar_mensaje("Error", f"No se pudo procesar tu reacción: {str(e)}", "red")
+        return False
+
+def mostrar_publicacion_con_opciones(pub_id, pub_data):
+    """Muestra una publicación con opciones para dar me gusta"""
+    timestamp = pub_data.get('timestamp', 0)
+    try:
+        fecha = datetime.datetime.fromtimestamp(timestamp).strftime("%d/%m %H:%M")
+    except:
+        fecha = "Fecha desconocida"
+    
+    # Determinar si el usuario actual ha dado me gusta
+    liked_by = pub_data.get('liked_by', {})
+    ha_dado_like = usuario_actual and usuario_actual['id'] in liked_by
+    
+    # Contador de likes
+    likes = pub_data.get('likes', 0)
+    
+    # Texto de likes
+    texto_likes = f"❤️ {likes}" if likes else "Sin me gusta"
+    if ha_dado_like:
+        texto_likes += " (Te gusta)"
+    
+    console.print(Panel(
+        f"{pub_data.get('contenido', 'Sin contenido')}\n\n"
+        f"[dim]👤 {pub_data.get('autor', 'Anónimo')}  •  📅 {fecha}[/dim]\n"
+        f"[bold]{texto_likes}[/bold]",
+        border_style="blue"
+    ))
+    
+    return ha_dado_like
+
 # Funciones de autenticación
 def registrar_usuario():
     """Registra un nuevo usuario en Realtime Database"""
@@ -159,7 +231,9 @@ def crear_publicacion():
         "user_id": usuario_actual['id'],
         "email": usuario_actual['email'],
         "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "timestamp": datetime.datetime.now().timestamp()
+        "timestamp": datetime.datetime.now().timestamp(),
+        "likes": 0,            # Inicializamos el contador de likes
+        "liked_by": {}         # Diccionario para registrar quién ha dado like
     }
     
     try:
@@ -170,7 +244,7 @@ def crear_publicacion():
         mostrar_mensaje("Error", f"No se pudo publicar: {str(e)}")
 
 def mostrar_publicaciones():
-    """Muestra las publicaciones recientes con manejo de reglas de Firebase"""
+    """Muestra las publicaciones recientes con opción para dar me gusta"""
     try:
         publicaciones_ref = db.reference('publicaciones')
         
@@ -186,18 +260,45 @@ def mostrar_publicaciones():
         
         console.print(Panel("Publicaciones recientes", style="bold blue"))
         
-        for pub_id, pub_data in publicaciones_ordenadas:
-            timestamp = pub_data.get('timestamp', 0)
-            try:
-                fecha = datetime.datetime.fromtimestamp(timestamp).strftime("%d/%m %H:%M")
-            except:
-                fecha = "Fecha desconocida"
+        while True:
+            # Mostrar publicaciones numeradas
+            for i, (pub_id, pub_data) in enumerate(publicaciones_ordenadas, 1):
+                console.print(f"[bold cyan]{i}.[/bold cyan]", end=" ")
+                mostrar_publicacion_con_opciones(pub_id, pub_data)
+            
+            # Opciones para el usuario
+            opciones = ["Volver al menú"]
+            if usuario_actual:
+                opciones.insert(0, "Dar/quitar me gusta a una publicación")
+            
+            accion = questionary.select(
+                "¿Qué deseas hacer?",
+                choices=opciones
+            ).ask()
+            
+            if accion == "Volver al menú":
+                break
+            elif accion == "Dar/quitar me gusta a una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación a la que quieres dar/quitar me gusta:"
+                ).ask()
                 
-            console.print(Panel(
-                f"{pub_data.get('contenido', 'Sin contenido')}\n\n"
-                f"[dim]👤 {pub_data.get('autor', 'Anónimo')}  •  📅 {fecha}[/dim]",
-                border_style="blue"
-            ))
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        pub_data = publicaciones_ordenadas[indice][1]
+                        
+                        # Dar/quitar me gusta
+                        if dar_me_gusta(pub_id):
+                            # Actualizar datos locales para reflejar el cambio
+                            pub_data_updated = db.reference(f'publicaciones/{pub_id}').get()
+                            if pub_data_updated:
+                                publicaciones_ordenadas[indice] = (pub_id, pub_data_updated)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
             
     except Exception as e:
         mostrar_mensaje("Error", f"No se pudieron cargar las publicaciones: {str(e)}")
@@ -272,12 +373,11 @@ def ver_perfil_usuario(usuario_id):
         return None
 
 def mostrar_publicaciones_usuario(usuario_id):
-    """Muestra las publicaciones de un usuario específico (actualizado para manejar reglas)"""
+    """Muestra las publicaciones de un usuario específico con opción para dar me gusta"""
     try:
         publicaciones_ref = db.reference('publicaciones')
         
         # Obtenemos todas las publicaciones y filtramos localmente
-        # (porque no tenemos índice en user_id según las reglas)
         mostrar_mensaje("Info", "Cargando publicaciones...", "blue")
         todas_publicaciones = publicaciones_ref.get() or {}
         
@@ -295,18 +395,45 @@ def mostrar_publicaciones_usuario(usuario_id):
         
         console.print(Panel(f"Publicaciones del usuario", style="bold blue"))
         
-        for pub_id, pub_data in publicaciones_ordenadas:
-            timestamp = pub_data.get('timestamp', 0)
-            try:
-                fecha = datetime.datetime.fromtimestamp(timestamp).strftime("%d/%m %H:%M")
-            except:
-                fecha = "Fecha desconocida"
+        while True:
+            # Mostrar publicaciones numeradas
+            for i, (pub_id, pub_data) in enumerate(publicaciones_ordenadas, 1):
+                console.print(f"[bold cyan]{i}.[/bold cyan]", end=" ")
+                mostrar_publicacion_con_opciones(pub_id, pub_data)
+            
+            # Opciones para el usuario
+            opciones = ["Volver"]
+            if usuario_actual:
+                opciones.insert(0, "Dar/quitar me gusta a una publicación")
+            
+            accion = questionary.select(
+                "¿Qué deseas hacer?",
+                choices=opciones
+            ).ask()
+            
+            if accion == "Volver":
+                break
+            elif accion == "Dar/quitar me gusta a una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación a la que quieres dar/quitar me gusta:"
+                ).ask()
                 
-            console.print(Panel(
-                f"{pub_data.get('contenido', 'Sin contenido')}\n\n"
-                f"[dim]📅 {fecha}[/dim]",
-                border_style="blue"
-            ))
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        pub_data = publicaciones_ordenadas[indice][1]
+                        
+                        # Dar/quitar me gusta
+                        if dar_me_gusta(pub_id):
+                            # Actualizar datos locales para reflejar el cambio
+                            pub_data_updated = db.reference(f'publicaciones/{pub_id}').get()
+                            if pub_data_updated:
+                                publicaciones_ordenadas[indice] = (pub_id, pub_data_updated)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
             
     except Exception as e:
         mostrar_mensaje("Error", f"No se pudieron cargar las publicaciones: {str(e)}")
