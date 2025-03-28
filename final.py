@@ -5,18 +5,22 @@ from rich.table import Table
 from rich.panel import Panel
 import questionary
 from questionary import Style as QStyle
-from datetime import datetime
 
-# Configuración Firebase
-cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://redsocial-9a347-default-rtdb.firebaseio.com/'
-})
-ref = db.reference()
+# Configuración de Firebase
+def inicializar_firebase():
+    try:
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://redsocial-9a347-default-rtdb.firebaseio.com/'
+        })
+        return db.reference()
+    except Exception as e:
+        console.print(Panel(f"[red]Error al conectar con Firebase: {str(e)}[/red]"))
+        return None
 
-# Estilos
+# Configuración de estilos
 console = Console()
-custom_style = QStyle([
+estilo_personalizado = QStyle([
     ('qmark', 'fg:#00ffff bold'),
     ('question', 'fg:#ffffff bold'),
     ('answer', 'fg:#00ff7f bold'),
@@ -25,169 +29,110 @@ custom_style = QStyle([
 ])
 
 def mostrar_menu_principal():
-    """Menú principal interactivo simplificado"""
+    """Muestra el menú principal"""
     while True:
         opcion = questionary.select(
-            "🌟 ADMINISTRADOR DE RED SOCIAL",
+            "🔍 VISOR DE USUARIOS Y PUBLICACIONES",
             choices=[
-                "👥 Listar usuarios",
-                "👤 Ver perfil",
-                "📝 Crear publicación",
-                "✏️ Editar perfil",
+                "👥 Listar todos los usuarios",
+                "👤 Ver perfil con publicaciones",
                 "🚪 Salir"
             ],
-            style=custom_style
+            style=estilo_personalizado
         ).ask()
 
-        if opcion == "👥 Listar usuarios":
+        if opcion == "👥 Listar todos los usuarios":
             listar_usuarios()
-        elif opcion == "👤 Ver perfil":
-            ver_perfil_completo()
-        elif opcion == "📝 Crear publicación":
-            crear_publicacion()
-        elif opcion == "✏️ Editar perfil":
-            editar_perfil()
+        elif opcion == "👤 Ver perfil con publicaciones":
+            ver_perfil_con_publicaciones()
         elif opcion == "🚪 Salir":
-            console.print(Panel("[bold green]✅ Sesión finalizada[/bold green]"))
+            console.print(Panel("[bold green]¡Hasta pronto![/bold green]", style="green"))
             break
 
 def listar_usuarios():
-    """Muestra lista simplificada de usuarios"""
-    usuarios = ref.child('usuarios').get()
-    
-    if not usuarios:
-        console.print(Panel("No hay usuarios registrados", style="red"))
-        return
-
-    tabla = Table(title="👥 LISTA DE USUARIOS")
-    tabla.add_column("Nombre", style="magenta")
-    tabla.add_column("Email", style="green")
-
-    for user_data in usuarios.values():
-        tabla.add_row(
-            user_data.get('nombre', 'Sin nombre'),
-            user_data.get('email', 'Sin email')
-        )
-
-    console.print(tabla)
-
-def ver_perfil_completo():
-    """Muestra perfil simplificado"""
-    usuarios = ref.child('usuarios').get()
-    
-    if not usuarios:
-        console.print(Panel("No hay usuarios registrados", style="red"))
-        return
-
-    # Selección de usuario
-    opciones = [f"{u['nombre']} ({u['email']})" for u in usuarios.values()]
-    seleccion = questionary.select(
-        "Seleccione un usuario:",
-        choices=opciones,
-        style=custom_style
-    ).ask()
-
-    user_id = next(uid for uid, u in usuarios.items() if f"{u['nombre']} ({u['email']})" == seleccion)
-    perfil = usuarios[user_id]
-
-    # Obtener publicaciones
+    """Muestra todos los usuarios registrados"""
     try:
-        publicaciones = ref.child('publicaciones').order_by_child('autor').equal_to(user_id).get() or {}
+        usuarios = ref.child('usuarios').get()
+        
+        if not usuarios:
+            console.print(Panel("No hay usuarios registrados", style="red"))
+            return
+
+        tabla = Table(title="👥 USUARIOS REGISTRADOS")
+        tabla.add_column("Nombre", style="magenta")
+        tabla.add_column("Email", style="cyan")
+
+        for datos_usuario in usuarios.values():
+            tabla.add_row(
+                datos_usuario.get('nombre', 'Sin nombre'),
+                datos_usuario.get('email', 'Sin email')
+            )
+
+        console.print(tabla)
+        console.print(f"\n[dim]Total usuarios: {len(usuarios)}[/dim]")
     except Exception as e:
+        console.print(Panel(f"[red]Error al cargar usuarios: {str(e)}[/red]"))
+
+def ver_perfil_con_publicaciones():
+    """Muestra el perfil completo con sus publicaciones"""
+    try:
+        usuarios = ref.child('usuarios').get()
+        
+        if not usuarios:
+            console.print(Panel("No hay usuarios registrados", style="red"))
+            return
+
+        # Selección de usuario
+        opciones_usuario = [f"{u['nombre']} ({u['email']})" for u in usuarios.values()]
+        seleccion = questionary.select(
+            "Seleccione un usuario:",
+            choices=opciones_usuario,
+            style=estilo_personalizado
+        ).ask()
+
+        id_usuario = next(uid for uid, u in usuarios.items() if f"{u['nombre']} ({u['email']})" == seleccion)
+        datos_usuario = usuarios[id_usuario]
+
+        # Mostrar información del perfil
         console.print(Panel(
-            f"⚠️ Error al cargar publicaciones: {str(e)}",
-            style="yellow"
+            f"[bold]👤 {datos_usuario.get('nombre', 'N/A')}[/bold]\n"
+            f"📧 [cyan]{datos_usuario.get('email', 'N/A')}[/cyan]\n"
+            f"📝 [yellow]{datos_usuario.get('bio', 'Sin biografía')}[/yellow]",
+            title="PERFIL DE USUARIO",
+            border_style="blue"
         ))
-        publicaciones = {}
 
-    # Mostrar información básica del perfil
-    console.print(Panel.fit(
-        f"[bold]👤 {perfil.get('nombre', 'N/A')}[/bold]\n"
-        f"[cyan]Email:[/cyan] {perfil.get('email', 'N/A')}\n"
-        f"[cyan]Biografía:[/cyan] {perfil.get('bio', 'No especificada')}",
-        title="PERFIL DE USUARIO",
-        border_style="blue"
-    ))
+        # Obtener publicaciones con método alternativo
+        try:
+            # Primero intentamos con el método indexado (más eficiente)
+            publicaciones = ref.child('publicaciones').order_by_child('autor').equal_to(id_usuario).get() or {}
+        except:
+            try:
+                # Método alternativo si falla el indexado (menos eficiente pero funciona)
+                todas_publicaciones = ref.child('publicaciones').get() or {}
+                publicaciones = {k: v for k, v in todas_publicaciones.items() if v.get('autor') == id_usuario}
+            except Exception as e:
+                console.print(Panel(f"[yellow]Advertencia: {str(e)}[/yellow]"))
+                publicaciones = {}
 
-    # Mostrar publicaciones simplificadas
-    if publicaciones:
-        console.print(Panel("📝 PUBLICACIONES", style="bold"))
-        for pub in publicaciones.values():
-            console.print(f"• {pub.get('contenido', 'Sin contenido')}")
-            console.print(f"  [dim]{pub.get('fecha', 'Sin fecha')}[/dim]\n")
-    else:
-        console.print(Panel("Este usuario no tiene publicaciones", style="yellow"))
+        # Mostrar publicaciones
+        if publicaciones:
+            console.print(Panel("📝 PUBLICACIONES", style="bold green"))
+            for pub_id, pub in publicaciones.items():
+                console.print(f"• {pub.get('contenido', 'Sin contenido')}")
+                console.print(f"  [dim]{pub.get('fecha', 'Sin fecha')}[/dim]\n")
+        else:
+            console.print(Panel("Este usuario no tiene publicaciones", style="yellow"))
 
-def crear_publicacion():
-    """Crea una nueva publicación"""
-    usuarios = ref.child('usuarios').get()
-    
-    if not usuarios:
-        console.print(Panel("No hay usuarios registrados", style="red"))
-        return
-
-    # Selección de usuario
-    opciones = [f"{u['nombre']} ({u['email']})" for u in usuarios.values()]
-    seleccion = questionary.select(
-        "Para qué usuario es la publicación:",
-        choices=opciones,
-        style=custom_style
-    ).ask()
-
-    user_id = next(uid for uid, u in usuarios.items() if f"{u['nombre']} ({u['email']})" == seleccion)
-    
-    contenido = questionary.text(
-        "Contenido de la publicación:",
-        validate=lambda text: True if text else "El contenido no puede estar vacío",
-        style=custom_style
-    ).ask()
-
-    try:
-        nueva_pub = {
-            'autor': user_id,
-            'contenido': contenido,
-            'fecha': datetime.now().strftime("%d/%m/%Y %H:%M")
-        }
-        ref.child('publicaciones').push(nueva_pub)
-        console.print(Panel("✅ Publicación creada!", style="green"))
     except Exception as e:
-        console.print(Panel(f"❌ Error: {e}", style="red"))
-
-def editar_perfil():
-    """Edición básica de perfil"""
-    usuarios = ref.child('usuarios').get()
-    
-    if not usuarios:
-        console.print(Panel("No hay usuarios para editar", style="red"))
-        return
-
-    # Selección de usuario
-    opciones = [f"{u['nombre']} ({u['email']})" for u in usuarios.values()]
-    seleccion = questionary.select(
-        "Seleccione usuario a editar:",
-        choices=opciones,
-        style=custom_style
-    ).ask()
-
-    user_id = next(uid for uid, u in usuarios.items() if f"{u['nombre']} ({u['email']})" == seleccion)
-    usuario_actual = usuarios[user_id]
-
-    # Formulario simplificado
-    nuevos_datos = questionary.form(
-        nombre=questionary.text("Nombre:", default=usuario_actual.get('nombre', '')),
-        email=questionary.text("Email:", default=usuario_actual.get('email', '')),
-        bio=questionary.text("Biografía:", default=usuario_actual.get('bio', ''))
-    ).ask(style=custom_style)
-
-    try:
-        ref.child('usuarios').child(user_id).update(nuevos_datos)
-        console.print(Panel("✅ Perfil actualizado!", style="green"))
-    except Exception as e:
-        console.print(Panel(f"❌ Error: {e}", style="red"))
+        console.print(Panel(f"[red]Error: {str(e)}[/red]"))
 
 if __name__ == "__main__":
-    console.print(Panel.fit(
-        "🌟 ADMINISTRADOR DE RED SOCIAL",
-        style="bold blue"
-    ))
-    mostrar_menu_principal()
+    ref = inicializar_firebase()
+    if ref:
+        console.print(Panel.fit(
+            "🔍 VISOR DE USUARIOS - FIREBASE",
+            subtitle="Conectado a la base de datos en tiempo real",
+            style="bold blue"
+        ))
+        mostrar_menu_principal()
