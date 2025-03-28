@@ -51,6 +51,84 @@ def verificar_contraseña(contraseña_plana, contraseña_hash):
     # Verificar
     return bcrypt.checkpw(contraseña_plana, contraseña_hash)
 
+# Funciones para comentarios
+def agregar_comentario(publicacion_id):
+    """Agrega un comentario a una publicación"""
+    if not usuario_actual:
+        mostrar_mensaje("Error", "Debes iniciar sesión para comentar", "red")
+        return False
+    
+    # Obtener el texto del comentario
+    texto_comentario = questionary.text("Escribe tu comentario:").ask()
+    if not texto_comentario:
+        return False
+    
+    try:
+        # Referencia a la publicación
+        pub_ref = db.reference(f'publicaciones/{publicacion_id}')
+        publicacion = pub_ref.get()
+        
+        if not publicacion:
+            mostrar_mensaje("Error", "Publicación no encontrada", "red")
+            return False
+        
+        # Crear el comentario
+        nuevo_comentario = {
+            "contenido": texto_comentario,
+            "autor": usuario_actual['nombre'],
+            "user_id": usuario_actual['id'],
+            "timestamp": datetime.datetime.now().timestamp(),
+            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # Verificar si ya existe la estructura de comentarios
+        comentarios = publicacion.get('comentarios', {})
+        
+        # Generar un ID único para el comentario (timestamp + sufijo aleatorio)
+        comentario_id = f"{int(datetime.datetime.now().timestamp())}-{len(comentarios) + 1}"
+        comentarios[comentario_id] = nuevo_comentario
+        
+        # Actualizar la publicación con el nuevo comentario
+        pub_ref.update({
+            'comentarios': comentarios
+        })
+        
+        mostrar_mensaje("Éxito", "Comentario publicado correctamente", "green")
+        return True
+    except Exception as e:
+        mostrar_mensaje("Error", f"No se pudo publicar el comentario: {str(e)}", "red")
+        return False
+
+def mostrar_comentarios(publicacion_id, pub_data):
+    """Muestra los comentarios de una publicación"""
+    comentarios = pub_data.get('comentarios', {})
+    
+    if not comentarios:
+        mostrar_mensaje("Info", "Esta publicación no tiene comentarios", "blue")
+        return
+    
+    # Ordenar comentarios por timestamp
+    comentarios_ordenados = sorted(
+        comentarios.items(), 
+        key=lambda x: x[1].get('timestamp', 0)
+    )
+    
+    console.print(Panel(f"Comentarios de la publicación", style="bold cyan"))
+    
+    for com_id, com_data in comentarios_ordenados:
+        # Formatear fecha
+        timestamp = com_data.get('timestamp', 0)
+        try:
+            fecha = datetime.datetime.fromtimestamp(timestamp).strftime("%d/%m %H:%M")
+        except:
+            fecha = com_data.get('fecha', 'Fecha desconocida')
+            
+        console.print(Panel(
+            f"{com_data.get('contenido', 'Sin contenido')}",
+            title=f"👤 {com_data.get('autor', 'Anónimo')} • {fecha}",
+            border_style="cyan"
+        ))
+
 # Funciones para "me gusta"
 def dar_me_gusta(publicacion_id):
     """Da me gusta a una publicación y actualiza en Firebase"""
@@ -95,7 +173,7 @@ def dar_me_gusta(publicacion_id):
         return False
 
 def mostrar_publicacion_con_opciones(pub_id, pub_data):
-    """Muestra una publicación con opciones para dar me gusta"""
+    """Muestra una publicación con opciones para dar me gusta y comentarios"""
     timestamp = pub_data.get('timestamp', 0)
     try:
         fecha = datetime.datetime.fromtimestamp(timestamp).strftime("%d/%m %H:%M")
@@ -109,19 +187,25 @@ def mostrar_publicacion_con_opciones(pub_id, pub_data):
     # Contador de likes
     likes = pub_data.get('likes', 0)
     
-    # Texto de likes
+    # Contador de comentarios
+    comentarios = pub_data.get('comentarios', {})
+    num_comentarios = len(comentarios)
+    
+    # Texto de likes y comentarios
     texto_likes = f"❤️ {likes}" if likes else "Sin me gusta"
     if ha_dado_like:
         texto_likes += " (Te gusta)"
     
+    texto_comentarios = f"💬 {num_comentarios} comentarios" if num_comentarios else "Sin comentarios"
+    
     console.print(Panel(
         f"{pub_data.get('contenido', 'Sin contenido')}\n\n"
         f"[dim]👤 {pub_data.get('autor', 'Anónimo')}  •  📅 {fecha}[/dim]\n"
-        f"[bold]{texto_likes}[/bold]",
+        f"[bold]{texto_likes}[/bold] | [bold cyan]{texto_comentarios}[/bold cyan]",
         border_style="blue"
     ))
     
-    return ha_dado_like
+    return ha_dado_like, num_comentarios
 
 # Funciones de autenticación
 def registrar_usuario():
@@ -212,7 +296,7 @@ def iniciar_sesion():
     mostrar_mensaje("Éxito", f"Bienvenido, {usuario_actual['nombre']}!", "green")
     return True
 
-# Funciones de publicaciones (actualizadas para manejar las reglas)
+# Funciones de publicaciones (actualizadas para manejar comentarios)
 def crear_publicacion():
     """Crea una nueva publicación vinculada al usuario"""
     if not usuario_actual:
@@ -233,7 +317,8 @@ def crear_publicacion():
         "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "timestamp": datetime.datetime.now().timestamp(),
         "likes": 0,            # Inicializamos el contador de likes
-        "liked_by": {}         # Diccionario para registrar quién ha dado like
+        "liked_by": {},        # Diccionario para registrar quién ha dado like
+        "comentarios": {}      # Diccionario para almacenar comentarios
     }
     
     try:
@@ -244,7 +329,7 @@ def crear_publicacion():
         mostrar_mensaje("Error", f"No se pudo publicar: {str(e)}")
 
 def mostrar_publicaciones():
-    """Muestra las publicaciones recientes con opción para dar me gusta"""
+    """Muestra las publicaciones recientes con opción para dar me gusta y comentar"""
     try:
         publicaciones_ref = db.reference('publicaciones')
         
@@ -269,6 +354,8 @@ def mostrar_publicaciones():
             # Opciones para el usuario
             opciones = ["Volver al menú"]
             if usuario_actual:
+                opciones.insert(0, "Comentar una publicación")
+                opciones.insert(0, "Ver comentarios de una publicación")
                 opciones.insert(0, "Dar/quitar me gusta a una publicación")
             
             accion = questionary.select(
@@ -300,6 +387,45 @@ def mostrar_publicaciones():
                 except ValueError:
                     mostrar_mensaje("Error", "Ingresa un número válido", "red")
             
+            elif accion == "Comentar una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación a la que quieres comentar:"
+                ).ask()
+                
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        
+                        # Agregar comentario
+                        if agregar_comentario(pub_id):
+                            # Actualizar datos locales para reflejar el cambio
+                            pub_data_updated = db.reference(f'publicaciones/{pub_id}').get()
+                            if pub_data_updated:
+                                publicaciones_ordenadas[indice] = (pub_id, pub_data_updated)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
+            
+            elif accion == "Ver comentarios de una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación cuyos comentarios quieres ver:"
+                ).ask()
+                
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        pub_data = publicaciones_ordenadas[indice][1]
+                        
+                        # Mostrar comentarios
+                        mostrar_comentarios(pub_id, pub_data)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
+            
     except Exception as e:
         mostrar_mensaje("Error", f"No se pudieron cargar las publicaciones: {str(e)}")
 
@@ -319,7 +445,7 @@ def listar_usuarios():
         opciones = []
         usuarios_lista = []
         for uid, user_data in usuarios.items():
-            if uid == usuario_actual['id']:
+            if usuario_actual and uid == usuario_actual['id']:
                 continue  # Saltar el usuario actual
             opcion = f"{user_data.get('nombre', 'Anónimo')} ({user_data.get('email', 'sin email')})"
             opciones.append(opcion)
@@ -330,6 +456,10 @@ def listar_usuarios():
                 'datos': user_data
             })
         
+        if not opciones:
+            mostrar_mensaje("Info", "No hay otros usuarios registrados", "blue")
+            return None
+            
         # Agregar opción para volver
         opciones.append("Volver")
         
@@ -373,7 +503,7 @@ def ver_perfil_usuario(usuario_id):
         return None
 
 def mostrar_publicaciones_usuario(usuario_id):
-    """Muestra las publicaciones de un usuario específico con opción para dar me gusta"""
+    """Muestra las publicaciones de un usuario específico con opción para dar me gusta y comentar"""
     try:
         publicaciones_ref = db.reference('publicaciones')
         
@@ -404,6 +534,8 @@ def mostrar_publicaciones_usuario(usuario_id):
             # Opciones para el usuario
             opciones = ["Volver"]
             if usuario_actual:
+                opciones.insert(0, "Comentar una publicación")
+                opciones.insert(0, "Ver comentarios de una publicación")
                 opciones.insert(0, "Dar/quitar me gusta a una publicación")
             
             accion = questionary.select(
@@ -430,6 +562,45 @@ def mostrar_publicaciones_usuario(usuario_id):
                             pub_data_updated = db.reference(f'publicaciones/{pub_id}').get()
                             if pub_data_updated:
                                 publicaciones_ordenadas[indice] = (pub_id, pub_data_updated)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
+                    
+            elif accion == "Comentar una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación a la que quieres comentar:"
+                ).ask()
+                
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        
+                        # Agregar comentario
+                        if agregar_comentario(pub_id):
+                            # Actualizar datos locales para reflejar el cambio
+                            pub_data_updated = db.reference(f'publicaciones/{pub_id}').get()
+                            if pub_data_updated:
+                                publicaciones_ordenadas[indice] = (pub_id, pub_data_updated)
+                    else:
+                        mostrar_mensaje("Error", "Número de publicación inválido", "red")
+                except ValueError:
+                    mostrar_mensaje("Error", "Ingresa un número válido", "red")
+            
+            elif accion == "Ver comentarios de una publicación":
+                indice = questionary.text(
+                    "Ingresa el número de la publicación cuyos comentarios quieres ver:"
+                ).ask()
+                
+                try:
+                    indice = int(indice) - 1
+                    if 0 <= indice < len(publicaciones_ordenadas):
+                        pub_id = publicaciones_ordenadas[indice][0]
+                        pub_data = publicaciones_ordenadas[indice][1]
+                        
+                        # Mostrar comentarios
+                        mostrar_comentarios(pub_id, pub_data)
                     else:
                         mostrar_mensaje("Error", "Número de publicación inválido", "red")
                 except ValueError:
