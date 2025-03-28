@@ -5,6 +5,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 import datetime
+import re  # Para validar correo electrónico
+import bcrypt  # Para encriptar contraseñas
 
 # Configuración de Firebase
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -24,6 +26,31 @@ def mostrar_mensaje(titulo, contenido, estilo="red"):
                        style=estilo,
                        border_style=estilo))
 
+def es_correo_valido(correo):
+    """Verifica si el correo electrónico tiene un formato válido"""
+    patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(patron, correo))
+
+def encriptar_contraseña(contraseña):
+    """Encripta una contraseña usando bcrypt"""
+    # Convertir a bytes si es una cadena
+    if isinstance(contraseña, str):
+        contraseña = contraseña.encode('utf-8')
+    # Generar sal y hash
+    sal = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(contraseña, sal)
+    return hashed.decode('utf-8')  # Convertir a string para almacenar
+
+def verificar_contraseña(contraseña_plana, contraseña_hash):
+    """Verifica si una contraseña coincide con su hash"""
+    # Convertir a bytes si son cadenas
+    if isinstance(contraseña_plana, str):
+        contraseña_plana = contraseña_plana.encode('utf-8')
+    if isinstance(contraseña_hash, str):
+        contraseña_hash = contraseña_hash.encode('utf-8')
+    # Verificar
+    return bcrypt.checkpw(contraseña_plana, contraseña_hash)
+
 # Funciones de autenticación
 def registrar_usuario():
     """Registra un nuevo usuario en Realtime Database"""
@@ -39,6 +66,16 @@ def registrar_usuario():
     if not datos:
         return
     
+    # Validar formato de correo electrónico
+    if not es_correo_valido(datos["email"]):
+        mostrar_mensaje("Error", "El correo electrónico no tiene un formato válido")
+        return
+    
+    # Validar longitud de contraseña
+    if len(datos["contraseña"]) < 8:
+        mostrar_mensaje("Error", "La contraseña debe tener al menos 8 caracteres")
+        return
+    
     if datos["contraseña"] != datos["confirmar"]:
         mostrar_mensaje("Error", "Las contraseñas no coinciden")
         return
@@ -51,10 +88,13 @@ def registrar_usuario():
             mostrar_mensaje("Error", "El correo electrónico ya está registrado")
             return
     
+    # Encriptar contraseña antes de almacenar
+    contraseña_encriptada = encriptar_contraseña(datos["contraseña"])
+    
     nuevo_usuario_ref = usuarios_ref.push({
         "email": datos["email"],
         "nombre": datos["nombre"],
-        "contraseña": datos["contraseña"],
+        "contraseña": contraseña_encriptada,
         "activo": True,
         "fecha_registro": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
@@ -81,7 +121,8 @@ def iniciar_sesion():
     usuario_encontrado = None
     for uid, user_data in usuarios.items():
         if user_data.get('email') == credenciales["email"]:
-            if user_data.get('contraseña') == credenciales["contraseña"]:
+            # Verificar contraseña hasheada
+            if verificar_contraseña(credenciales["contraseña"], user_data.get('contraseña')):
                 usuario_encontrado = user_data
                 usuario_encontrado['id'] = uid
                 break
