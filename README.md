@@ -101,4 +101,7 @@ https://gamma.app/docs/CENTRO-ENTRENAMIENTO-INTENSIVO-BOOTCAMP-CampusLands-c8kga
 
 https://1drv.ms/p/c/74f634baa07751f9/EVaVx38iEBJBozHhOT-P36gBjX07zLzJeRDpTkKQlKQ1pA?e=Wukx2X
 
+NOTION
+
+https://www.notion.so/Proyecto-RedSocial-1c2047816a6780e2a76ae9212d72198c?pvs=4
 
